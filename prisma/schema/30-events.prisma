@@ -1,0 +1,172 @@
+// ─────────────────────────────────────────────────────────────
+// MODULE 3 — ÉVÉNEMENTS, ACTIVITÉS & BILLETTERIE
+// ─────────────────────────────────────────────────────────────
+
+model Event {
+  id             String  @id @default(cuid())
+  organizationId String
+  slug           String
+  title          String
+  description    String?
+  // MEETING, ACTIVITY, TRAINING, COMPETITION, FUNDRAISER, TRIP, SOCIAL, OTHER
+  kind           String  @default("ACTIVITY")
+  // DRAFT, PUBLISHED, FULL, CANCELED, ARCHIVED
+  status         String  @default("DRAFT")
+
+  startAt DateTime
+  endAt   DateTime
+  isAllDay Boolean @default(false)
+
+  locationName    String?
+  locationAddress String?
+  // Visioconférence ou événement hybride
+  onlineUrl       String?
+
+  // Jauge globale ; null = illimité
+  capacity        Int?
+  // Inscriptions ouvertes uniquement aux adhérents
+  membersOnly     Boolean   @default(true)
+  registrationOpensAt  DateTime?
+  registrationClosesAt DateTime?
+  // Une inscription doit-elle être validée par un responsable ?
+  requiresApproval Boolean  @default(false)
+
+  coverUrl String?
+  // Étiquettes libres, JSON
+  tags     String @default("[]")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization  Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ticketTypes   TicketType[]
+  registrations Registration[]
+  bookings      ResourceBooking[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId, startAt])
+  @@index([organizationId, status])
+}
+
+// Tarif de billetterie : gratuit, plein tarif, tarif adhérent, etc.
+model TicketType {
+  id             String  @id @default(cuid())
+  organizationId String
+  eventId        String
+
+  name        String
+  description String?
+  priceCents  Int     @default(0)
+  // Nombre de places pour ce tarif ; null = puise dans la jauge de l'événement
+  quantity    Int?
+  // Réservé à une catégorie d'adhérents précise
+  categoryId  String?
+
+  salesStartAt DateTime?
+  salesEndAt   DateTime?
+  position     Int       @default(0)
+  archivedAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  event         Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  registrations Registration[]
+
+  @@index([organizationId])
+  @@index([eventId])
+}
+
+model Registration {
+  id             String  @id @default(cuid())
+  organizationId String
+  eventId        String
+  memberId       String?
+  ticketTypeId   String?
+
+  // Inscrit non adhérent (public extérieur)
+  guestName  String?
+  guestEmail String?
+  guestPhone String?
+
+  // PENDING (à valider), CONFIRMED, WAITLISTED (liste d'attente), CANCELED, ATTENDED, NO_SHOW
+  status   String @default("CONFIRMED")
+  quantity Int    @default(1)
+
+  amountCents Int     @default(0)
+  paidCents   Int     @default(0)
+  // Code de contrôle imprimé sur le billet
+  ticketCode  String? @unique
+
+  // Pointage de présence le jour J
+  checkedInAt DateTime?
+  canceledAt  DateTime?
+
+  // Réponses au formulaire d'inscription, JSON
+  answers String  @default("{}")
+  notes   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  event        Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  member       Member?      @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  ticketType   TicketType?  @relation(fields: [ticketTypeId], references: [id], onDelete: SetNull)
+
+  // Un adhérent ne s'inscrit qu'une fois par événement
+  @@unique([eventId, memberId])
+  @@index([organizationId, status])
+  @@index([eventId, status])
+  @@index([memberId])
+}
+
+// Ressource réservable : salle, véhicule, matériel
+model Resource {
+  id             String  @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  // ROOM, VEHICLE, EQUIPMENT, OTHER
+  kind           String  @default("ROOM")
+  location       String?
+  capacity       Int?
+  // Une réservation doit-elle être validée ?
+  requiresApproval Boolean @default(false)
+  archivedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bookings     ResourceBooking[]
+
+  @@index([organizationId, archivedAt])
+}
+
+model ResourceBooking {
+  id             String  @id @default(cuid())
+  organizationId String
+  resourceId     String
+  eventId        String?
+
+  title   String
+  startAt DateTime
+  endAt   DateTime
+  // PENDING, APPROVED, REJECTED, CANCELED
+  status  String   @default("APPROVED")
+
+  requestedByUserId String?
+  notes             String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  resource     Resource     @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  event        Event?       @relation(fields: [eventId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, startAt])
+  @@index([resourceId, startAt])
+}

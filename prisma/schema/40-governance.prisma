@@ -1,0 +1,226 @@
+// ─────────────────────────────────────────────────────────────
+// MODULE 4 — GOUVERNANCE, VOTES & DOCUMENTS
+// ─────────────────────────────────────────────────────────────
+
+// Réunion statutaire : AG ordinaire/extraordinaire, conseil d'administration, bureau
+model Meeting {
+  id             String  @id @default(cuid())
+  organizationId String
+
+  title String
+  // AGO (AG ordinaire), AGE (AG extraordinaire), BOARD (CA), OFFICE (bureau), COMMITTEE, OTHER
+  kind  String  @default("AGO")
+  // SCHEDULED, CONVENED (convoquée), IN_PROGRESS, HELD (tenue), MINUTED (PV validé), CANCELED
+  status String @default("SCHEDULED")
+
+  startAt DateTime
+  endAt   DateTime?
+
+  locationName    String?
+  locationAddress String?
+  onlineUrl       String?
+
+  // Ordre du jour (texte riche ou Markdown)
+  agenda String?
+
+  // Quorum requis en points de base des membres votants (5000 = 50 %)
+  quorumBps Int @default(0)
+  // Constat de quorum au moment de l'ouverture
+  presentCount Int @default(0)
+  proxyCount   Int @default(0)
+  votingBase   Int @default(0)
+  quorumMet    Boolean?
+
+  convenedAt DateTime?
+  // Procès-verbal
+  minutes         String?
+  minutesApprovedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  attendees    MeetingAttendee[]
+  resolutions  Resolution[]
+  documents    Document[]
+
+  @@index([organizationId, startAt])
+  @@index([organizationId, status])
+}
+
+// Feuille de présence + procurations
+model MeetingAttendee {
+  id        String @id @default(cuid())
+  meetingId String
+  memberId  String
+
+  // INVITED, PRESENT, REPRESENTED (a donné pouvoir), ABSENT, EXCUSED
+  status String @default("INVITED")
+  // Membre porteur du pouvoir lorsque status = REPRESENTED
+  proxyToMemberId String?
+  // Nombre de voix détenues (droits de vote + pouvoirs reçus)
+  voteWeight      Int     @default(1)
+
+  checkedInAt DateTime?
+  signatureUrl String?
+
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  member  Member  @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([meetingId, memberId])
+  @@index([meetingId, status])
+  @@index([memberId])
+}
+
+// Résolution soumise au vote
+model Resolution {
+  id             String  @id @default(cuid())
+  organizationId String
+  meetingId      String?
+
+  number      Int
+  title       String
+  description String?
+
+  // SIMPLE (majorité simple), ABSOLUTE (majorité absolue), TWO_THIRDS, THREE_QUARTERS, UNANIMOUS
+  majorityRule String @default("SIMPLE")
+  // Scrutin secret : les votes ne sont plus rattachables nominativement à l'affichage
+  isSecret     Boolean @default(false)
+  // Le vote électronique reste ouvert entre ces deux dates
+  opensAt      DateTime?
+  closesAt     DateTime?
+
+  // DRAFT, OPEN, CLOSED, ADOPTED, REJECTED, WITHDRAWN
+  status String @default("DRAFT")
+
+  forCount     Int @default(0)
+  againstCount Int @default(0)
+  abstainCount Int @default(0)
+
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  meeting      Meeting?     @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+  votes        Vote[]
+
+  @@index([organizationId, status])
+  @@index([meetingId])
+}
+
+model Vote {
+  id           String @id @default(cuid())
+  resolutionId String
+  memberId     String
+
+  // FOR, AGAINST, ABSTAIN
+  choice String
+  // Poids du vote au moment du scrutin (pouvoirs inclus)
+  weight Int    @default(1)
+
+  castAt    DateTime @default(now())
+  ipAddress String?
+
+  resolution Resolution @relation(fields: [resolutionId], references: [id], onDelete: Cascade)
+  member     Member     @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  // Un seul vote par membre et par résolution
+  @@unique([resolutionId, memberId])
+  @@index([resolutionId])
+  @@index([memberId])
+}
+
+// Mandat électif : président, trésorier, secrétaire, administrateur…
+model Mandate {
+  id             String @id @default(cuid())
+  organizationId String
+  memberId       String
+
+  // PRESIDENT, VICE_PRESIDENT, TREASURER, DEPUTY_TREASURER, SECRETARY,
+  // DEPUTY_SECRETARY, BOARD_MEMBER, AUDITOR, OTHER
+  role  String
+  title String?
+
+  startDate DateTime
+  endDate   DateTime?
+  // Élu lors de cette réunion
+  electedAtMeetingId String?
+  // Le mandat confère-t-il la signature bancaire ?
+  hasBankSignature   Boolean @default(false)
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       Member       @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, role])
+  @@index([organizationId, endDate])
+  @@index([memberId])
+}
+
+// ── GED : arborescence de dossiers + documents ──
+
+model DocumentFolder {
+  id             String  @id @default(cuid())
+  organizationId String
+  parentId       String?
+
+  name String
+  // Dossier système non supprimable (Statuts, PV, Comptabilité…)
+  isSystem Boolean @default(false)
+  position Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       DocumentFolder?  @relation("FolderTree", fields: [parentId], references: [id], onDelete: Cascade)
+  children     DocumentFolder[] @relation("FolderTree")
+  documents    Document[]
+
+  @@index([organizationId, parentId])
+}
+
+model Document {
+  id             String  @id @default(cuid())
+  organizationId String
+  folderId       String?
+  meetingId      String?
+
+  name        String
+  description String?
+  // STATUTES (statuts), BYLAWS (règlement intérieur), MINUTES (PV), REPORT,
+  // CONTRACT, INVOICE, RECEIPT, INSURANCE, GRANT, PHOTO, OTHER
+  kind        String  @default("OTHER")
+
+  fileUrl   String
+  mimeType  String?
+  sizeBytes Int     @default(0)
+  checksum  String?
+
+  version  Int     @default(1)
+  // PRIVATE (bureau), MEMBERS (tous les adhérents), PUBLIC
+  visibility String @default("PRIVATE")
+
+  // Étiquettes libres, JSON
+  tags String @default("[]")
+  // Date d'expiration (assurance, agrément…) pour les relances
+  expiresAt DateTime?
+
+  uploadedByUserId String?
+  archivedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  folder       DocumentFolder? @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  meeting      Meeting?        @relation(fields: [meetingId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, kind])
+  @@index([organizationId, expiresAt])
+  @@index([folderId])
+}

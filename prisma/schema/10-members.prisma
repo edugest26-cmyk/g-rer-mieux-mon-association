@@ -1,0 +1,180 @@
+
+// ─────────────────────────────────────────────────────────────
+// MODULE 1 — MEMBRES & ADHÉSIONS
+// ─────────────────────────────────────────────────────────────
+
+model MemberCategory {
+  id             String  @id @default(cuid())
+  organizationId String
+  name           String
+  code           String
+  description    String?
+  color          String?
+  // Droit de vote en AG attaché à la catégorie
+  hasVotingRight Boolean @default(true)
+  position       Int     @default(0)
+  archivedAt     DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  members      Member[]
+  fees         Fee[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId])
+}
+
+model Member {
+  id             String @id @default(cuid())
+  organizationId String
+  // Numéro d'adhérent lisible, unique par association
+  memberNumber   String
+  // PERSON (personne physique) | ORGANIZATION (personne morale)
+  kind           String @default("PERSON")
+  // PENDING, ACTIVE, LAPSED (cotisation échue), SUSPENDED, RESIGNED, EXCLUDED, DECEASED
+  status         String @default("PENDING")
+
+  // Compte de connexion associé (facultatif : un adhérent n'a pas forcément d'accès)
+  userId String?
+
+  civility    String?
+  firstName   String?
+  lastName    String?
+  // Raison sociale si kind = ORGANIZATION
+  legalName   String?
+  birthDate   DateTime?
+  birthPlace  String?
+  nationality String?
+  // M, F, X, ou null si non renseigné
+  gender      String?
+
+  email          String?
+  emailSecondary String?
+  phone          String?
+  mobile         String?
+
+  addressLine1 String?
+  addressLine2 String?
+  postalCode   String?
+  city         String?
+  country      String  @default("FR")
+
+  categoryId String?
+
+  joinedAt    DateTime  @default(now())
+  leftAt      DateTime?
+  leaveReason String?
+
+  photoUrl String?
+  notes    String?
+  // Champs personnalisés définis par l'association, JSON
+  customFields String @default("{}")
+  // Étiquettes libres, JSON : ["bénévole","permis B"]
+  tags         String @default("[]")
+
+  // RGPD : consentements et droit à l'image
+  acceptsNewsletter Boolean   @default(false)
+  acceptsPhotos     Boolean   @default(false)
+  consentAt         DateTime?
+  anonymizedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization  Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user          User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+  category      MemberCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  dues          Due[]
+  payments      Payment[]
+  donations     Donation[]
+  registrations Registration[]
+  attendances   MeetingAttendee[]
+  votes         Vote[]
+  mandates      Mandate[]
+  invoices      Invoice[]
+  taxReceipts   TaxReceipt[]
+  skills        MemberSkill[]
+
+  @@unique([organizationId, memberNumber])
+  @@index([organizationId, status])
+  @@index([organizationId, lastName])
+  @@index([organizationId, email])
+  @@index([categoryId])
+}
+
+// Compétences / disponibilités bénévoles
+model MemberSkill {
+  id       String @id @default(cuid())
+  memberId String
+  name     String
+  // BEGINNER, INTERMEDIATE, EXPERT
+  level    String @default("INTERMEDIATE")
+
+  member Member @relation(fields: [memberId], references: [id], onDelete: Cascade)
+
+  @@unique([memberId, name])
+  @@index([memberId])
+}
+
+// Barème de cotisation
+model Fee {
+  id             String  @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  amountCents    Int
+  // ANNUAL, SEMESTRIAL, QUARTERLY, MONTHLY, ONE_TIME, LIFETIME
+  period         String  @default("ANNUAL")
+  categoryId     String?
+  // Cotisation ouvrant droit à un reçu fiscal
+  taxDeductible  Boolean @default(false)
+  // Montant libre (l'adhérent choisit, amountCents devient un minimum)
+  isFreeAmount   Boolean @default(false)
+
+  validFrom  DateTime?
+  validUntil DateTime?
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  category     MemberCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  dues         Due[]
+
+  @@index([organizationId, archivedAt])
+}
+
+// Appel de cotisation : ce qu'un membre doit pour une période donnée
+model Due {
+  id             String  @id @default(cuid())
+  organizationId String
+  memberId       String
+  feeId          String?
+
+  label       String
+  amountCents Int
+  paidCents   Int    @default(0)
+  // PENDING, PARTIAL, PAID, WAIVED (exonéré), CANCELED
+  status      String @default("PENDING")
+
+  periodStart DateTime
+  periodEnd   DateTime
+  dueDate     DateTime?
+
+  remindersSent  Int       @default(0)
+  lastReminderAt DateTime?
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       Member       @relation(fields: [memberId], references: [id], onDelete: Cascade)
+  fee          Fee?         @relation(fields: [feeId], references: [id], onDelete: SetNull)
+  payments     Payment[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, periodEnd])
+  @@index([memberId])
+}

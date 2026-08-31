@@ -1,0 +1,333 @@
+// ─────────────────────────────────────────────────────────────
+// MODULE 2 — FINANCES & COMPTABILITÉ
+// ─────────────────────────────────────────────────────────────
+
+// Exercice comptable
+model FiscalYear {
+  id             String    @id @default(cuid())
+  organizationId String
+  label          String
+  startDate      DateTime
+  endDate        DateTime
+  // OPEN, CLOSING, CLOSED
+  status         String    @default("OPEN")
+  closedAt       DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@unique([organizationId, label])
+  @@index([organizationId, status])
+}
+
+// Plan comptable (PCG associatif : 6xx charges, 7xx produits, 5xx trésorerie…)
+model LedgerAccount {
+  id             String    @id @default(cuid())
+  organizationId String
+  number         String
+  name           String
+  // ASSET, LIABILITY, EQUITY, REVENUE, EXPENSE
+  type           String
+  parentId       String?
+  description    String?
+  isSystem       Boolean   @default(false)
+  archivedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent       LedgerAccount?    @relation("AccountTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children     LedgerAccount[]   @relation("AccountTree")
+  lines        TransactionLine[]
+  budgetLines  BudgetLine[]
+
+  @@unique([organizationId, number])
+  @@index([organizationId, type])
+  @@index([parentId])
+}
+
+model BankAccount {
+  id             String    @id @default(cuid())
+  organizationId String
+  name           String
+  // CHECKING, SAVINGS, CASH (caisse), OTHER
+  kind           String    @default("CHECKING")
+  bankName       String?
+  iban           String?
+  bic            String?
+  // Solde d'ouverture, en centimes
+  openingBalanceCents Int  @default(0)
+  currency       String    @default("EUR")
+  archivedAt     DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  transactions Transaction[]
+  payments     Payment[]
+
+  @@index([organizationId, archivedAt])
+}
+
+// Écriture comptable (en-tête). L'équilibre débit = crédit est vérifié applicativement.
+model Transaction {
+  id             String  @id @default(cuid())
+  organizationId String
+  fiscalYearId   String?
+  bankAccountId  String?
+
+  reference   String
+  label       String
+  description String?
+  date        DateTime
+  // INCOME (recette), EXPENSE (dépense), TRANSFER, OPENING, CLOSING, ADJUSTMENT
+  kind        String
+  // DRAFT, POSTED (validée), RECONCILED (rapprochée), CANCELED
+  status      String   @default("DRAFT")
+
+  totalCents Int
+  // Rapprochement bancaire
+  reconciledAt  DateTime?
+  attachmentUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fiscalYear   FiscalYear?       @relation(fields: [fiscalYearId], references: [id], onDelete: SetNull)
+  bankAccount  BankAccount?      @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  lines        TransactionLine[]
+  payments     Payment[]
+
+  @@unique([organizationId, reference])
+  @@index([organizationId, date])
+  @@index([organizationId, status])
+  @@index([fiscalYearId])
+}
+
+// Ligne d'écriture : un seul des deux montants est non nul (partie double)
+model TransactionLine {
+  id            String @id @default(cuid())
+  transactionId String
+  accountId     String
+
+  label       String?
+  debitCents  Int     @default(0)
+  creditCents Int     @default(0)
+  position    Int     @default(0)
+
+  transaction Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  account     LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@index([transactionId])
+  @@index([accountId])
+}
+
+model Invoice {
+  id             String  @id @default(cuid())
+  organizationId String
+  memberId       String?
+
+  number String
+  // INVOICE (facture), CREDIT_NOTE (avoir), QUOTE (devis)
+  kind   String @default("INVOICE")
+  // DRAFT, SENT, PARTIAL, PAID, OVERDUE, CANCELED
+  status String @default("DRAFT")
+
+  // Destinataire libre lorsque la facture n'est pas rattachée à un adhérent
+  recipientName    String
+  recipientEmail   String?
+  recipientAddress String?
+
+  issueDate DateTime  @default(now())
+  dueDate   DateTime?
+
+  subtotalCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int @default(0)
+  paidCents     Int @default(0)
+
+  notes String?
+  terms String?
+
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       Member?       @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  lines        InvoiceLine[]
+  payments     Payment[]
+
+  @@unique([organizationId, number])
+  @@index([organizationId, status])
+  @@index([memberId])
+}
+
+model InvoiceLine {
+  id        String @id @default(cuid())
+  invoiceId String
+
+  description String
+  quantity    Int    @default(1)
+  unitCents   Int
+  // Taux de TVA en points de base (2000 = 20 %) ; beaucoup d'associations sont exonérées
+  taxRateBps  Int    @default(0)
+  totalCents  Int
+  position    Int    @default(0)
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([invoiceId])
+}
+
+model Payment {
+  id             String  @id @default(cuid())
+  organizationId String
+  memberId       String?
+  dueId          String?
+  invoiceId      String?
+  transactionId  String?
+  bankAccountId  String?
+
+  amountCents Int
+  date        DateTime @default(now())
+  // CASH, CHECK, TRANSFER, CARD, DIRECT_DEBIT, ONLINE, OTHER
+  method      String   @default("TRANSFER")
+  // PENDING, COMPLETED, FAILED, REFUNDED
+  status      String   @default("COMPLETED")
+
+  // Numéro de chèque, référence de virement…
+  reference String?
+  notes     String?
+
+  externalPaymentId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       Member?      @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  due          Due?         @relation(fields: [dueId], references: [id], onDelete: SetNull)
+  invoice      Invoice?     @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  transaction  Transaction? @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  bankAccount  BankAccount? @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  donation     Donation?
+
+  @@index([organizationId, date])
+  @@index([memberId])
+  @@index([dueId])
+  @@index([invoiceId])
+}
+
+model Donation {
+  id             String  @id @default(cuid())
+  organizationId String
+  memberId       String?
+  paymentId      String? @unique
+
+  // Identité du donateur lorsqu'il n'est pas adhérent
+  donorName    String
+  donorEmail   String?
+  donorAddress String?
+
+  amountCents Int
+  date        DateTime @default(now())
+  // MONEY, IN_KIND (don en nature), SKILL (mécénat de compétences), SECURITIES
+  kind        String   @default("MONEY")
+  isRecurring Boolean  @default(false)
+
+  campaign      String?
+  isAnonymous   Boolean @default(false)
+  // Le donateur renonce explicitement à son reçu fiscal
+  waivesReceipt Boolean @default(false)
+
+  notes     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  member       Member?      @relation(fields: [memberId], references: [id], onDelete: SetNull)
+  payment      Payment?     @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  taxReceipt   TaxReceipt?
+
+  @@index([organizationId, date])
+  @@index([memberId])
+}
+
+// Reçu fiscal (France : Cerfa 11580) — la numérotation doit être séquentielle et sans trou
+model TaxReceipt {
+  id             String  @id @default(cuid())
+  organizationId String
+  donationId     String? @unique
+  memberId       String?
+
+  number      String
+  year        Int
+  amountCents Int
+  issueDate   DateTime @default(now())
+
+  recipientName    String
+  recipientAddress String?
+
+  // Article du CGI : 200 (particuliers), 238bis (entreprises), 978 (IFI)
+  taxArticle String @default("200")
+  // ISSUED, SENT, CANCELED
+  status     String @default("ISSUED")
+
+  pdfUrl String?
+  sentAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  donation     Donation?    @relation(fields: [donationId], references: [id], onDelete: SetNull)
+  member       Member?      @relation(fields: [memberId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, number])
+  @@index([organizationId, year])
+}
+
+model Budget {
+  id             String  @id @default(cuid())
+  organizationId String
+  fiscalYearId   String?
+  name           String
+  description    String?
+  // DRAFT, APPROVED, CLOSED
+  status         String  @default("DRAFT")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  fiscalYear   FiscalYear?  @relation(fields: [fiscalYearId], references: [id], onDelete: SetNull)
+  lines        BudgetLine[]
+
+  @@index([organizationId, status])
+}
+
+model BudgetLine {
+  id        String  @id @default(cuid())
+  budgetId  String
+  accountId String?
+
+  label        String
+  plannedCents Int    @default(0)
+  // REVENUE ou EXPENSE
+  direction    String @default("EXPENSE")
+  position     Int    @default(0)
+
+  budget  Budget         @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  account LedgerAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([budgetId])
+  @@index([accountId])
+}

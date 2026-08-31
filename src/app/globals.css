@@ -1,26 +1,269 @@
-@import "tailwindcss";
+@import 'tailwindcss';
+
+/* =====================================================================
+   GERMA — jetons de conception
+   ---------------------------------------------------------------------
+   L'outil est tenu par des bénévoles : un trésorier qui pointe des
+   règlements un dimanche soir, une secrétaire qui relit une liste
+   d'adhérents sur son téléphone avant une assemblée. Rarement des
+   informaticiens, souvent des yeux qui ont passé la cinquantaine.
+   Quatre conséquences, qui expliquent les choix ci-dessous :
+     · contraste élevé, jamais de gris pâle sur blanc ;
+     · cibles tactiles de 44 px, y compris dans les tableaux ;
+     · chiffres à chasse fixe — une colonne de montants mal alignée
+       devient illisible dès la troisième ligne ;
+     · aucune police distante : la première ouverture doit tenir sur une
+       connexion médiocre, donc la pile système.
+
+   Thème sombre fourni : ces séances de saisie ont souvent lieu le soir.
+   ===================================================================== */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* --- Neutres : gris légèrement bleutés, accordés au bleu de marque -- */
+  --c-canvas: #f4f6f9;
+  --c-surface: #ffffff;
+  --c-surface-muted: #eef1f6;
+  --c-line: #dfe4ec;
+  --c-line-strong: #c6cedb;
+
+  --c-ink: #101722;
+  --c-ink-soft: #414b5c;
+  --c-ink-faint: #5b6576;
+
+  /* --- Marque ---------------------------------------------------------
+     Le logo porte trois couleurs : bleu, vert et orange.
+
+     Seul le bleu est fonctionnel. Le vert est à un cheveu de --positive
+     et l'orange de --warning : en faire des couleurs de boutons rendrait
+     indiscernables « action » et « état ». Ils restent donc décoratifs,
+     réservés au logo lui-même.                                          */
+  --c-brand: #1259c9;
+  --c-brand-dark: #0e469f;
+  --c-brand-soft: #e6eefb;
+  /* Texte posé SUR le bleu : blanc en clair, sombre en thème sombre —
+     sans quoi le thème sombre donnerait du blanc sur bleu pâle. */
+  --c-brand-ink: #ffffff;
+
+  /* --- Signaux --------------------------------------------------------
+     Chacun a son fond pâle assorti : une pastille colore son fond, jamais
+     seulement son texte, pour rester lisible en plein soleil.            */
+  --c-positive: #10653f;
+  --c-positive-soft: #dcf0e5;
+  --c-warning: #8a5406;
+  --c-warning-soft: #fbf0d8;
+  --c-danger: #a32020;
+  --c-danger-soft: #fbe3e3;
+  --c-neutral-soft: #e8ebf1;
+  /* Texte posé SUR un aplat de signal (pastille, bouton danger). Même
+     raison que --c-brand-ink : en thème sombre les signaux deviennent
+     clairs, du blanc dessus serait illisible. */
+  --c-signal-ink: #ffffff;
+
+  /* Le logo garde ses couleurs sur fond clair. */
+  --logo-filtre: none;
+
+  color-scheme: light;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
+/* Thème sombre : des valeurs choisies contre cette surface, jamais une
+   inversion mécanique du thème clair. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  :root:not([data-theme='clair']) {
+    --c-canvas: #0d1219;
+    --c-surface: #151c26;
+    --c-surface-muted: #1d2632;
+    --c-line: #2a3442;
+    --c-line-strong: #3a4657;
+
+    --c-ink: #e7ecf3;
+    --c-ink-soft: #b0bac9;
+    --c-ink-faint: #8b95a6;
+
+    --c-brand: #7fa6ea;
+    --c-brand-dark: #9cbcf3;
+    --c-brand-soft: #14243e;
+    --c-brand-ink: #06111f;
+
+    --c-positive: #5fc496;
+    --c-positive-soft: #14291f;
+    --c-warning: #e0ae4a;
+    --c-warning-soft: #2a2211;
+    --c-danger: #ee7a7a;
+    --c-danger-soft: #2e1616;
+    --c-neutral-soft: #222b37;
+    --c-signal-ink: #12181f;
+
+    /* Le noir du logo se fond dans la surface sombre : on le réveille. */
+    --logo-filtre: brightness(1.15) saturate(1.05);
+
+    color-scheme: dark;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+:root[data-theme='sombre'] {
+  --c-canvas: #0d1219;
+  --c-surface: #151c26;
+  --c-surface-muted: #1d2632;
+  --c-line: #2a3442;
+  --c-line-strong: #3a4657;
+
+  --c-ink: #e7ecf3;
+  --c-ink-soft: #b0bac9;
+  --c-ink-faint: #8b95a6;
+
+  --c-brand: #7fa6ea;
+  --c-brand-dark: #9cbcf3;
+  --c-brand-soft: #14243e;
+  --c-brand-ink: #06111f;
+
+  --c-positive: #5fc496;
+  --c-positive-soft: #14291f;
+  --c-warning: #e0ae4a;
+  --c-warning-soft: #2a2211;
+  --c-danger: #ee7a7a;
+  --c-danger-soft: #2e1616;
+  --c-neutral-soft: #222b37;
+  --c-signal-ink: #12181f;
+
+  --logo-filtre: brightness(1.15) saturate(1.05);
+
+  color-scheme: dark;
+}
+
+/*
+  `@theme inline` fait émettre à Tailwind `var(--c-…)` dans les utilitaires
+  plutôt que la valeur résolue. C'est ce qui permet au thème sombre de
+  s'appliquer sans dupliquer une seule classe.
+*/
+@theme inline {
+  --color-canvas: var(--c-canvas);
+  --color-surface: var(--c-surface);
+  --color-surface-muted: var(--c-surface-muted);
+  --color-line: var(--c-line);
+  --color-line-strong: var(--c-line-strong);
+
+  --color-ink: var(--c-ink);
+  --color-ink-soft: var(--c-ink-soft);
+  --color-ink-faint: var(--c-ink-faint);
+
+  --color-brand: var(--c-brand);
+  --color-brand-dark: var(--c-brand-dark);
+  --color-brand-soft: var(--c-brand-soft);
+  --color-brand-ink: var(--c-brand-ink);
+
+  --color-positive: var(--c-positive);
+  --color-positive-soft: var(--c-positive-soft);
+  --color-warning: var(--c-warning);
+  --color-warning-soft: var(--c-warning-soft);
+  --color-danger: var(--c-danger);
+  --color-danger-soft: var(--c-danger-soft);
+  --color-neutral-soft: var(--c-neutral-soft);
+  --color-signal-ink: var(--c-signal-ink);
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  --radius-card: 0.75rem;
+
+  /* Cible tactile minimale. Une ligne de tableau où l'on doit pointer une
+     présence n'y échappe pas. */
+  --spacing-cible: 44px;
+}
+
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    border-color: var(--c-line);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--c-canvas);
+    color: var(--c-ink);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior-y: none;
+  }
+
+  img,
+  svg {
+    display: block;
+    max-width: 100%;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  h1,
+  h2,
+  h3 {
+    line-height: 1.2;
+    letter-spacing: -0.015em;
+    text-wrap: balance;
+  }
+
+  /* Tout montant, effectif ou date s'aligne en colonne. */
+  table,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--c-brand);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Respecte le réglage système : certaines personnes sont gênées par
+     les animations, d'autres les désactivent pour économiser la batterie. */
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer components {
+  .card {
+    background-color: var(--c-surface);
+    border: 1px solid var(--c-line);
+    border-radius: var(--radius-card);
+  }
+
+  /* Pastilles de statut : le fond porte le sens, le texte reste lisible. */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  /* Le logo est un JPEG à fond noir : sur thème sombre il se confond avec
+     la surface, on le relève légèrement. */
+  .logo-plaque {
+    filter: var(--logo-filtre);
+  }
 }

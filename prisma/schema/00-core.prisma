@@ -1,0 +1,243 @@
+// GERMA — Gérer Mieux Mon Association : SaaS de gestion associative multi-tenant
+//
+// PostgreSQL en développement comme en production : une seule base pour les
+// deux évite les écarts de comportement qui ne se révèlent qu'au déploiement.
+//
+// Conventions transverses :
+//  - isolation tenant : colonne `organizationId` sur chaque modèle métier,
+//                       index et contraintes uniques toujours préfixés par elle
+//  - montants en centimes (Int), jamais en flottants : l'erreur d'arrondi
+//    devient visible dès qu'on additionne quelques centaines de cotisations
+//  - statuts en `String` plutôt qu'en `enum` : les valeurs admises et leurs
+//    libellés vivent dans src/lib/enums.ts, modifiables sans migration
+//  - champs JSON sérialisés en `String` (customFields, tags, permissions)
+
+generator client {
+  provider = "prisma-client"
+  output   = "../../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────
+// SOCLE SaaS : tenant, identité, RBAC, facturation, audit
+// ─────────────────────────────────────────────────────────────
+
+model Organization {
+  id        String  @id @default(cuid())
+  slug      String  @unique
+  name      String
+  legalName String?
+  // Type d'association : ASSOCIATION_1901, FONDATION, ONG, SYNDICAT, CLUB, COOPERATIVE, AUTRE
+  kind      String  @default("ASSOCIATION_1901")
+
+  email   String?
+  phone   String?
+  website String?
+
+  addressLine1 String?
+  addressLine2 String?
+  postalCode   String?
+  city         String?
+  country      String  @default("FR")
+
+  // Identifiants légaux (France : RNA W..., SIRET, APE) — optionnels et libres pour l'international
+  rnaNumber String?
+  siret     String?
+  vatNumber String?
+
+  logoUrl  String?
+  currency String @default("EUR")
+  locale   String @default("fr-FR")
+  timezone String @default("Europe/Paris")
+
+  // Exercice comptable : mois/jour de début (1er janvier par défaut)
+  fiscalYearStartMonth Int @default(1)
+  fiscalYearStartDay   Int @default(1)
+
+  // Modules activés, sérialisés en JSON : {"members":true,"finance":true,...}
+  enabledModules String @default("{}")
+  settings       String @default("{}")
+
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  memberships    Membership[]
+  invitations    Invitation[]
+  subscription   OrgSubscription?
+  auditLogs      AuditLog[]
+  members        Member[]
+  memberCategories MemberCategory[]
+  fees           Fee[]
+  dues           Due[]
+  accounts       LedgerAccount[]
+  transactions   Transaction[]
+  invoices       Invoice[]
+  payments       Payment[]
+  donations      Donation[]
+  taxReceipts    TaxReceipt[]
+  budgets        Budget[]
+  fiscalYears    FiscalYear[]
+  bankAccounts   BankAccount[]
+  events         Event[]
+  ticketTypes    TicketType[]
+  registrations  Registration[]
+  resources      Resource[]
+  bookings       ResourceBooking[]
+  meetings       Meeting[]
+  resolutions    Resolution[]
+  documents      Document[]
+  documentFolders DocumentFolder[]
+  mandates       Mandate[]
+
+  @@index([archivedAt])
+}
+
+// Identité globale : un compte peut appartenir à plusieurs associations
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  firstName     String
+  lastName      String
+  avatarUrl     String?
+  locale        String    @default("fr-FR")
+
+  isSuperAdmin Boolean @default(false)
+
+  lastLoginAt DateTime?
+  disabledAt  DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  memberships    Membership[]
+  sessions       Session[]
+  auditLogs      AuditLog[]
+  memberProfiles Member[]
+  passwordResets PasswordResetToken[]
+  invitationsSent Invitation[]        @relation("InvitationInviter")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  userId       String
+  tokenHash    String   @unique
+  ipAddress    String?
+  userAgent    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  lastActiveAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Appartenance d'un User à une Organization + rôle (RBAC)
+model Membership {
+  id             String @id @default(cuid())
+  userId         String
+  organizationId String
+  // OWNER, ADMIN, TREASURER, SECRETARY, MANAGER, MEMBER, VIEWER
+  role           String @default("MEMBER")
+  // Permissions additionnelles/retirées, JSON : {"grant":["finance.write"],"revoke":[]}
+  permissions    String @default("{}")
+
+  title     String?
+  isDefault Boolean   @default(false)
+  joinedAt  DateTime  @default(now())
+  leftAt    DateTime?
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId, role])
+}
+
+model Invitation {
+  id             String @id @default(cuid())
+  organizationId String
+  email          String
+  role           String @default("MEMBER")
+  tokenHash      String @unique
+  invitedById    String?
+
+  expiresAt  DateTime
+  acceptedAt DateTime?
+  revokedAt  DateTime?
+  createdAt  DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  invitedBy    User?        @relation("InvitationInviter", fields: [invitedById], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+}
+
+// Abonnement SaaS de l'association à la plateforme
+model OrgSubscription {
+  id             String @id @default(cuid())
+  organizationId String @unique
+  // FREE, STARTER, PRO, ENTERPRISE
+  plan           String @default("FREE")
+  // TRIALING, ACTIVE, PAST_DUE, CANCELED
+  status         String @default("TRIALING")
+
+  memberLimit  Int @default(50)
+  storageLimit Int @default(1024)
+
+  trialEndsAt        DateTime?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+  canceledAt         DateTime?
+
+  externalCustomerId     String?
+  externalSubscriptionId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id             String  @id @default(cuid())
+  organizationId String?
+  userId         String?
+
+  action     String
+  entityType String
+  entityId   String?
+  // Diff sérialisé en JSON
+  changes    String  @default("{}")
+  ipAddress  String?
+  userAgent  String?
+
+  createdAt DateTime @default(now())
+
+  organization Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, entityType, entityId])
+}
